@@ -41,7 +41,8 @@ class MultiHeadMiiNet(nn.Module):
         # probing is robust across all backbones.
         self.backbone.eval()
         with torch.no_grad():
-            feat = int(self.backbone(torch.zeros(1, 3, 224, 224)).shape[1])
+            input_size = getattr(self.backbone, "default_cfg", {}).get("input_size", (3, 224, 224))
+            feat = int(self.backbone(torch.zeros(1, *input_size)).shape[1])
         self.feat_dim = feat
 
         self.heads = nn.ModuleDict()

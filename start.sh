@@ -136,14 +136,14 @@ case "$RENDERER" in
     cp -f assets/FFLResHigh.dat FFL-Testing/FFLResHigh.dat
     warn "native build is experimental; Docker (ffl_docker) is more reliable."
     if command -v apt-get >/dev/null 2>&1; then
-      SUDO apt-get update && SUDO apt-get install -y git g++ cmake pkg-config libglfw3-dev zlib1g-dev libgl1-mesa-dev libosmesa6-dev
+      SUDO apt-get update && SUDO apt-get install -y xvfb git g++ cmake pkg-config libglfw3-dev zlib1g-dev libgl1-mesa-dev libosmesa6-dev
     elif command -v dnf >/dev/null 2>&1; then
       SUDO dnf install -y git gcc-c++ cmake pkgconfig glfw-devel zlib-devel mesa-libGL-devel mesa-libOSMesa-devel
     else warn "unknown package manager; install glfw3+zlib+mesa-GL+g+++cmake yourself"; fi
     ( cd FFL-Testing && cmake -S . -B build -DRIO_NO_CLIP_CONTROL=ON -DRIO_USE_HEADLESS_GLFW=ON \
         -DCMAKE_CXX_FLAGS="-DNDEBUG -O3" && cmake --build build -j"$NCORES" )
     log "starting renderer + web server in background (logs in /tmp/ffl_*.log)"
-    ( cd FFL-Testing && nohup ./build/ffl_testing_2 --server >/tmp/ffl_render.log 2>&1 & )
+    ( cd FFL-Testing && nohup xvfb-run -a ./build/ffl_testing_2 --server >/tmp/ffl_render.log 2>&1 & )
     if [ -d FFL-Testing/server-impl ] && command -v go >/dev/null 2>&1; then
       ( cd FFL-Testing/server-impl && nohup go run . >/tmp/ffl_web.log 2>&1 & )
     else warn "Go web server not started (need Go in server-impl). See FFL-Testing README."; fi
@@ -171,8 +171,8 @@ ask JITTER  "Jitter for plausible (none/light/medium/heavy)" "medium"
 CL="${CHANNELS_LAST:-true}"   # NHWC: ~40% faster conv on CPU (oneDNN) and on GPU
 if [ "$HAS_GPU" = 1 ]; then
   # GPU pipeline: big backbone, full res, AMP
-  DEF_N=50000; DEF_EPOCHS=20; DEF_BATCH=256; DEF_BACKBONE="convnext_tiny"; DEF_PRE="true"
-  DEF_WIDTH=224; DEF_WORKERS=$(( NCORES < 16 ? NCORES : 16 )); DEF_AMP="true"; DEF_LR="0.0008"; DEF_WARM=1000; DEF_LOG=50
+  DEF_N=50000; DEF_EPOCHS=20; DEF_BATCH=256; DEF_BACKBONE="vit_base_patch16_siglip_256"; DEF_PRE="true"
+  DEF_WIDTH=256; DEF_WORKERS=$(( NCORES < 16 ? NCORES : 16 )); DEF_AMP="true"; DEF_LR="0.0008"; DEF_WARM=1000; DEF_LOG=50
   log "pipeline: GPU (backbone=$DEF_BACKBONE @${DEF_WIDTH}px, AMP)"
 else
   # CPU pipeline: lightweight mobile backbone + low res (much faster on CPU).
