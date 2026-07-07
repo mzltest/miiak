@@ -1,0 +1,28 @@
+# CPU pipeline: lightweight mobile backbone + low resolution + channels_last.
+# ~10x faster than ConvNeXt@224 on CPU. Generate data first, then:
+#   python -m m2a.train --config configs/cpu.yaml --data data/train
+# Backbone options by speed/quality:
+#   mobilenetv3_small_100 @128  (fastest)
+#   mobilenetv3_large_100 @160  (balanced, default)
+#   resnet50              @192  (highest quality, slower)
+data: data/train
+out: runs/cpu_mnv3
+model:
+  backbone: mobilenetv3_large_100
+  pretrained: true          # ImageNet weights (small download); set false if offline
+  head_hidden: 0
+  dropout: 0.1
+train:
+  image_size: 160
+  batch_size: 64
+  epochs: 18
+  lr: 0.0015
+  weight_decay: 0.05
+  warmup_steps: 50
+  num_workers: 4
+  amp: false                # AMP is a GPU feature; no-op on CPU
+  channels_last: true       # ~40% faster conv on CPU (oneDNN NHWC)
+  grad_clip: 5.0
+  label_smoothing: 0.05
+  log_interval_steps: 20
+  seed: 0

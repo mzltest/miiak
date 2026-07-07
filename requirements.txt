@@ -1,0 +1,10 @@
+# Core ML stack. For CPU-only boxes install torch/torchvision from the CPU index:
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+#   pip install -r requirements.txt
+# On a CUDA GPU box, install the matching CUDA torch build first, then this file.
+torch>=2.1
+torchvision>=0.16
+timm>=0.9.16
+pillow>=9.0
+requests>=2.28
+pyyaml>=6.0

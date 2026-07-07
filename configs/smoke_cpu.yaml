@@ -1,0 +1,24 @@
+# CPU smoke test: tiny backbone, no pretrained download, few epochs.
+data: data/smoke
+out: runs/smoke
+model:
+  backbone: resnet18      # small/fast for CPU; GPU config uses convnext_tiny
+  pretrained: false       # avoid weight download in sandbox
+  head_hidden: 0
+  dropout: 0.1
+train:
+  image_size: 224
+  batch_size: 16
+  epochs: 3
+  lr: 0.0015
+  weight_decay: 0.05
+  warmup_steps: 10
+  num_workers: 2
+  cpu_threads: 2
+  amp: false
+  channels_last: true
+  grad_clip: 5.0
+  label_smoothing: 0.05
+  log_interval_steps: 10
+  max_steps: 0            # 0 = run full epochs; override with --max-steps
+  seed: 0

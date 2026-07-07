@@ -1,0 +1,20 @@
+# data, checkpoints, caches
+data/
+runs/
+smoke/*.png
+__pycache__/
+*.pyc
+.venv/
+configs/auto.yaml
+assets/_aflres*
+
+# large / copyrighted assets (provide your own)
+assets/*.dat
+assets/*.zip
+assets/asset/
+
+# vendored reference clones (clone as needed; see README)
+FFL-Testing/
+mii-js/
+MiiJS/
+MiiDataFiles/

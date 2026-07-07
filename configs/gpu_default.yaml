@@ -1,0 +1,25 @@
+# Full training on GPU. Generate a large dataset first (see README), then:
+#   python -m m2a.train --config configs/gpu_default.yaml
+#   torchrun --nproc_per_node=N -m m2a.train --config configs/gpu_default.yaml
+data: data/train
+out: runs/convnext_tiny
+model:
+  backbone: convnext_tiny   # or resnet50
+  pretrained: true          # downloads timm/HF weights (needs internet on the box)
+  head_hidden: 0            # try 512 for a small MLP head
+  dropout: 0.1
+train:
+  image_size: 224
+  batch_size: 256           # per-GPU; scale lr accordingly
+  epochs: 40
+  lr: 0.0008
+  weight_decay: 0.05
+  warmup_steps: 1000
+  num_workers: 16
+  amp: true
+  channels_last: true
+  grad_clip: 5.0
+  label_smoothing: 0.05
+  log_interval_steps: 50
+  max_steps: 0
+  seed: 0
