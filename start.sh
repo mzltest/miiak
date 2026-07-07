@@ -143,7 +143,7 @@ case "$RENDERER" in
     ( cd FFL-Testing && cmake -S . -B build -DRIO_NO_CLIP_CONTROL=ON -DRIO_USE_HEADLESS_GLFW=ON \
         -DCMAKE_CXX_FLAGS="-DNDEBUG -O3" && cmake --build build -j"$NCORES" )
     log "starting renderer + web server in background (logs in /tmp/ffl_*.log)"
-    ( cd FFL-Testing && nohup xvfb-run -a ./build/ffl_testing_2 --server >/tmp/ffl_render.log 2>&1 & )
+    ( cd FFL-Testing && nohup xvfb-run -a ./ffl_testing_2 --server >/tmp/ffl_render.log 2>&1 & )
     if [ -d FFL-Testing/server-impl ] && command -v go >/dev/null 2>&1; then
       ( cd FFL-Testing/server-impl && nohup go run . >/tmp/ffl_web.log 2>&1 & )
     else warn "Go web server not started (need Go in server-impl). See FFL-Testing README."; fi
