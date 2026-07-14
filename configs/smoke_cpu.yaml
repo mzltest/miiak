@@ -1,5 +1,5 @@
 # CPU smoke test: tiny backbone, no pretrained download, few epochs.
-data: data/smoke
+data: data/auto
 out: runs/smoke
 model:
   backbone: resnet18      # small/fast for CPU; GPU config uses convnext_tiny
