@@ -57,6 +57,8 @@ NCORES=$( (nproc 2>/dev/null || echo 4) )
 if [ "$HAS_GPU" = 1 ]; then log "GPU: yes (${NGPU}x)  docker: $([ $HAS_DOCKER = 1 ] && echo yes || echo no)  cores: $NCORES"
 else log "GPU: none (CPU mode)  docker: $([ $HAS_DOCKER = 1 ] && echo yes || echo no)  cores: $NCORES"; fi
 
+export HF_HUB_DISABLE_XET=1
+
 # 2) python + deps ------------------------------------------------------------
 USE_VENV="${USE_VENV:-1}"
 PYBIN="python3"
