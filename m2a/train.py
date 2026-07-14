@@ -281,8 +281,11 @@ def main():
             run_loss += float(loss.detach())
             nb += 1
             gstep += 1
-            if is_main(rank) and gstep % log_int == 0:
-                print(f"  e{epoch} step {gstep}/{total_steps} loss {run_loss/nb:.3f} lr {lr:.2e}")
+            if is_main(rank) and (gstep % log_int == 0 or gstep == 1):
+                if two_step and 'box_loss' in locals():
+                    print(f"  e{epoch} step {gstep}/{total_steps} loss {run_loss/nb:.3f} (box_loss: {box_loss:.3f}, cls_loss: {cls_loss:.3f}) lr {lr:.2e}")
+                else:
+                    print(f"  e{epoch} step {gstep}/{total_steps} loss {run_loss/nb:.3f} lr {lr:.2e}")
             if max_steps and gstep >= max_steps:
                 stop = True
                 break
