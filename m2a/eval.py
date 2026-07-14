@@ -19,13 +19,23 @@ def load_model(ckpt_path, device):
     ck = torch.load(ckpt_path, map_location=device)
     cfg = ck.get("cfg", {})
     m = cfg.get("model", {})
+    two_step = cfg.get("train", {}).get("two_step", False)
     model = MultiHeadMiiNet(backbone=m.get("backbone", "convnext_tiny"),
                             pretrained=False, head_hidden=m.get("head_hidden", 0),
                             dropout=m.get("dropout", 0.1),
-                            head_num_classes=ck.get("head_num_classes"))
+                            head_num_classes=ck.get("head_num_classes"),
+                            two_step=two_step)
     model.load_state_dict(ck["model"])
     model.to(device).eval()
-    return model, cfg
+
+    det_model = None
+    if two_step and "det_model" in ck:
+        from .detection_model import build_detection_model
+        det_model = build_detection_model(cfg)
+        det_model.load_state_dict(ck["det_model"])
+        det_model.to(device).eval()
+
+    return model, det_model, cfg
 
 
 def main():
@@ -39,16 +49,24 @@ def main():
     args = ap.parse_args()
 
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    model, cfg = load_model(args.ckpt, device)
+    model, det_model, cfg = load_model(args.ckpt, device)
 
     ds = MiiAttrDataset(args.data, args.split, args.image_size, train=False)
     loader = torch.utils.data.DataLoader(ds, batch_size=args.batch_size, shuffle=False,
                                          collate_fn=collate_fn)
     acc = MetricAccumulator()
     with torch.no_grad():
-        for xb, yb in loader:
-            xb = xb.to(device)
-            out = model(xb)
+        for batch in loader:
+            xb = batch[0].to(device)
+            yb = batch[1]
+            if det_model is not None:
+                boxes = det_model(xb)
+                out = model(xb, boxes)
+            elif len(batch) > 2 and getattr(model, "two_step", False):
+                boxes = {k: v.to(device) for k, v in batch[2].items()}
+                out = model(xb, boxes)
+            else:
+                out = model(xb)
             acc.update({k: v.cpu() for k, v in out.items()}, yb)
 
     head_acc = acc.head_acc()

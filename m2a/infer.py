@@ -22,11 +22,15 @@ from .studio import encode_studio
 from .renderer import build_renderer, RenderOptions
 
 
-def predict_fields(model, image: Image.Image, device, image_size=224):
+def predict_fields(model, det_model, image: Image.Image, device, image_size=224):
     tf = build_transform(image_size, train=False)
     x = tf(image.convert("RGB")).unsqueeze(0).to(device)
     with torch.no_grad():
-        out = model(x)
+        if det_model is not None:
+            boxes = det_model(x)
+            out = model(x, boxes)
+        else:
+            out = model(x)
     fields = {}
     for h in HEAD_FIELDS:
         label = int(out[h].argmax(1).item())
@@ -52,11 +56,11 @@ def main():
     args = ap.parse_args()
 
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    model, cfg = load_model(args.ckpt, device)
+    model, det_model, cfg = load_model(args.ckpt, device)
     image_size = int(cfg.get("train", {}).get("image_size", 224))
 
     src = Image.open(args.image).convert("RGB")
-    fields = predict_fields(model, src, device, image_size)
+    fields = predict_fields(model, det_model, src, device, image_size)
     if args.print_fields:
         print(json.dumps({h: fields[h] for h in HEAD_FIELDS}, indent=2))
 

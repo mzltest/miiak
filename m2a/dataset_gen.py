@@ -34,6 +34,7 @@ from .schema import FIELDS, HEAD_FIELDS, HEAD_NUM_CLASSES, NUISANCE_FIELDS
 from .studio import sample_fields, irrelevant_heads, encode_studio
 from .ffl_random import sample_ffl, sample_plausible
 from .renderer import build_renderer, sample_render_options
+from .bounding_boxes import compute_bounding_boxes_by_diff
 
 IGNORE = -100
 
@@ -75,10 +76,15 @@ def _gen_one(idx, args, split):
     img = renderer.render(fields, opt=opt, randomizer=randomizer)
     rel = os.path.join("images", f"{idx:07d}.png")
     img.convert("RGB").save(os.path.join(args.out, rel))
+
+    # Compute bounding boxes for the step 2 object detection using image diffing
+    boxes = compute_bounding_boxes_by_diff(fields, opt, randomizer, renderer)
+
     return {
         "file": rel,
         "split": split,
         "labels": _labels_for(fields),
+        "boxes": boxes,
         "fields": fields,
         "render": {"width": opt.width, "type": opt.type, "expression": opt.expression,
                    "bgColor": opt.bg_color, "clothesColor": opt.clothes_color,

@@ -26,3 +26,4 @@ train:
   label_smoothing: 0.05
   log_interval_steps: 20
   seed: 0
+  two_step: true

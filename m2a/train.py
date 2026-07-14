@@ -69,16 +69,27 @@ def cosine_lr(step, total, base_lr, warmup):
 
 # ---------------------------------------------------------------------------
 @torch.no_grad()
-def evaluate(model, loader, device, autocast_ctx, channels_last=False):
+def evaluate(model, loader, device, autocast_ctx, channels_last=False, det_model=None):
     model.eval()
+    if det_model:
+        det_model.eval()
     acc = MetricAccumulator()
-    for xb, yb in loader:
-        xb = xb.to(device, non_blocking=True)
+    for batch in loader:
+        xb = batch[0].to(device, non_blocking=True)
+        yb = batch[1]
         if channels_last:
             xb = xb.to(memory_format=torch.channels_last)
         yb = {k: v.to(device, non_blocking=True) for k, v in yb.items()}
         with autocast_ctx():
-            out = model(xb)
+            if det_model is not None:
+                boxes = det_model(xb)
+                out = model(xb, boxes)
+            elif len(batch) > 2 and getattr(model, "two_step", False):
+                # use ground truth boxes during val if no det_model is provided
+                boxes = {k: v.to(device) for k, v in batch[2].items()}
+                out = model(xb, boxes)
+            else:
+                out = model(xb)
         acc.update(out, yb)
     return acc
 
@@ -143,9 +154,20 @@ def main():
         sampler = None
 
     model = build_model(cfg).to(device)
+
+    # Check if two step training is enabled
+    two_step = cfg.get("train", {}).get("two_step", False)
+    det_model = None
+    if two_step:
+        from .detection_model import build_detection_model
+        det_model = build_detection_model(cfg).to(device)
+
     channels_last = bool(tcfg.get("channels_last", True))
     if channels_last:
         model = model.to(memory_format=torch.channels_last)  # NHWC: faster conv on CPU(oneDNN)/GPU
+        if det_model:
+            det_model = det_model.to(memory_format=torch.channels_last)
+
     if is_main(rank):
         print(f"device={device} backbone={model.backbone_name} "
               f"params={model.num_parameters()/1e6:.1f}M heads={len(model.heads)} "
@@ -153,9 +175,17 @@ def main():
     if distributed:
         ddp_kw = {"device_ids": [local]} if torch.cuda.is_available() else {}
         model = nn.parallel.DistributedDataParallel(model, **ddp_kw)
+        if det_model:
+            det_model = nn.parallel.DistributedDataParallel(det_model, **ddp_kw)
 
     criterion = MultiTaskCriterion(label_smoothing=float(tcfg.get("label_smoothing", 0.0)))
-    opt = torch.optim.AdamW(model.parameters(), lr=float(tcfg.get("lr", 1e-3)),
+
+    # Collect parameters
+    params = list(model.parameters())
+    if det_model:
+        params += list(det_model.parameters())
+
+    opt = torch.optim.AdamW(params, lr=float(tcfg.get("lr", 1e-3)),
                             weight_decay=float(tcfg.get("weight_decay", 0.05)))
 
     use_amp = bool(tcfg.get("amp", False)) and device.type == "cuda"
@@ -199,9 +229,13 @@ def main():
         if distributed:
             sampler.set_epoch(epoch)
         model.train()
+        if det_model:
+            det_model.train()
         t0 = time.time()
         run_loss, nb = 0.0, 0
-        for xb, yb in train_loader:
+        for batch in train_loader:
+            xb = batch[0]
+            yb = batch[1]
             lr = cosine_lr(gstep, total_steps, base_lr, warmup)
             for g in opt.param_groups:
                 g["lr"] = lr
@@ -209,10 +243,35 @@ def main():
             if channels_last:
                 xb = xb.to(memory_format=torch.channels_last)
             yb = {k: v.to(device, non_blocking=True) for k, v in yb.items()}
+
+            # Ground truth bounding boxes for two step
+            gt_boxes = None
+            if two_step and len(batch) > 2:
+                gt_boxes = {k: v.to(device, non_blocking=True) for k, v in batch[2].items()}
+
             opt.zero_grad(set_to_none=True)
             with autocast_ctx():
-                out = model(xb)
-                loss, _ = criterion(out, yb)
+                loss = 0.0
+                if two_step:
+                    # Train bounding box regressor if we have ground truth
+                    if gt_boxes is not None:
+                        pred_boxes = det_model(xb)
+                        box_loss = 0.0
+                        for k in gt_boxes:
+                            # L1 loss for bounding boxes
+                            box_loss += torch.nn.functional.l1_loss(pred_boxes[k], gt_boxes[k])
+                        loss += box_loss * 0.1 # weighting for box loss
+
+                        # Forward pass model with predicted boxes to make the gradient flow all the way
+                        out = model(xb, pred_boxes)
+                    else:
+                        out = model(xb, det_model(xb))
+                else:
+                    out = model(xb)
+
+                cls_loss, _ = criterion(out, yb)
+                loss += cls_loss
+
             scaler.scale(loss).backward()
             if grad_clip > 0:
                 scaler.unscale_(opt)
@@ -230,7 +289,9 @@ def main():
 
         # eval (rank 0)
         if is_main(rank):
-            acc = evaluate(model.module if distributed else model, val_loader, device, autocast_ctx, channels_last)
+            eval_det = det_model.module if distributed and det_model else det_model
+            eval_mod = model.module if distributed else model
+            acc = evaluate(eval_mod, val_loader, device, autocast_ctx, channels_last, eval_det)
             mean_acc, exact = acc.mean_acc(), acc.exact_match()
             dt = time.time() - t0
             print(f"[epoch {epoch}] train_loss {run_loss/max(1,nb):.3f} "
@@ -243,6 +304,8 @@ def main():
                   "opt": opt.state_dict(), "scaler": scaler.state_dict(),
                   "epoch": epoch, "gstep": gstep, "best": best, "cfg": cfg,
                   "head_num_classes": (model.module if distributed else model).head_num_classes}
+            if det_model:
+                ck["det_model"] = (det_model.module if distributed else det_model).state_dict()
             torch.save(ck, os.path.join(out_dir, "last.pt"))
             if mean_acc > best:
                 best = mean_acc
