@@ -22,3 +22,4 @@ train:
   log_interval_steps: 10
   max_steps: 0            # 0 = run full epochs; override with --max-steps
   seed: 0
+  two_step: true

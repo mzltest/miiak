@@ -68,13 +68,28 @@ class MiiAttrDataset(Dataset):
         img = Image.open(os.path.join(self.root, r["file"])).convert("RGB")
         x = self.tf(img)
         labels = {h: int(r["labels"][h]) for h in HEAD_FIELDS}
-        return x, labels
+        item = (x, labels)
+        if "boxes" in r:
+            # Normalize boxes based on the original width since transforms resize the image
+            # Render width was stored in r["render"]["width"]
+            orig_W = r["render"]["width"]
+            scaled_boxes = {}
+            for k, box in r["boxes"].items():
+                scaled_boxes[k] = [c / orig_W for c in box]
+            item = (x, labels, scaled_boxes)
+        return item
 
 
 def collate_fn(batch):
     xs = torch.stack([b[0] for b in batch], 0)
     labels = {h: torch.tensor([b[1][h] for b in batch], dtype=torch.long)
               for h in HEAD_FIELDS}
+    if len(batch[0]) > 2:
+        boxes_list = [b[2] for b in batch]
+        boxes = {}
+        for k in boxes_list[0].keys():
+            boxes[k] = torch.tensor([box[k] for box in boxes_list], dtype=torch.float)
+        return xs, labels, boxes
     return xs, labels
 
 
