@@ -168,6 +168,19 @@ esac
 log "renderer: kind=$RENDER_KIND url=${RENDER_URL:-<default>}"; hr
 
 # 4) sampling + sizes + config -----------------------------------------------
+RESUME_CKPT="runs/auto/last.pt"
+RESUME_CONF="configs/auto.yaml"
+RESUME_ARG=""
+if [ -f "$RESUME_CKPT" ] && [ -f "$RESUME_CONF" ]; then
+  ask RESUME_RUN "Found existing checkpoint at $RESUME_CKPT. Resume training? (y/n)" "y"
+  if [ "$RESUME_RUN" = "y" ]; then
+    log "resuming from $RESUME_CKPT. Skipping config/data regeneration."
+    RESUME_ARG="--resume $RESUME_CKPT"
+    SKIP_DATA=1
+  fi
+fi
+
+if [ -z "$RESUME_ARG" ]; then
 ask SAMPLER "Sampler (plausible/ffl/uniform)" "plausible"
 ask JITTER  "Jitter for plausible (none/light/medium/heavy)" "medium"
 CL="${CHANNELS_LAST:-true}"   # NHWC: ~40% faster conv on CPU (oneDNN) and on GPU
@@ -227,6 +240,7 @@ train:
   two_step: $TWO_STEP
 EOF
 log "wrote configs/auto.yaml (backbone=$BACKBONE pretrained=$PRETRAINED batch=$BATCH epochs=$EPOCHS)"; hr
+fi
 
 # 5) dataset ------------------------------------------------------------------
 SKIP_DATA="${SKIP_DATA:-0}"
@@ -255,12 +269,12 @@ fi
 log "starting training (loss + per-epoch val accuracy will stream below)"; hr
 if [ "$USE_DDP" = 1 ] && [ "${NGPU:-1}" -gt 1 ]; then
   if command -v torchrun >/dev/null 2>&1; then
-    torchrun --nproc_per_node="$NGPU" -m m2a.train --config configs/auto.yaml
+    torchrun --nproc_per_node="$NGPU" -m m2a.train --config configs/auto.yaml $RESUME_ARG
   else
-    "$PYBIN" -m torch.distributed.run --nproc_per_node="$NGPU" -m m2a.train --config configs/auto.yaml
+    "$PYBIN" -m torch.distributed.run --nproc_per_node="$NGPU" -m m2a.train --config configs/auto.yaml $RESUME_ARG
   fi
 else
-  "$PYBIN" -m m2a.train --config configs/auto.yaml
+  "$PYBIN" -m m2a.train --config configs/auto.yaml $RESUME_ARG
 fi
 hr
 log "done. checkpoints: runs/auto/{last,best}.pt   log: runs/auto/log.csv"
