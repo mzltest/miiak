@@ -186,6 +186,7 @@ else
   DEF_N=30000; DEF_PRE="true"; DEF_WORKERS=$(( NCORES < 6 ? NCORES : 6 )); DEF_AMP="false"
   DEF_LR="0.0015"; DEF_WARM=50; DEF_LOG=20
   log "pipeline: CPU (profile=$CPU_PROFILE, backbone=$DEF_BACKBONE @${DEF_WIDTH}px, channels_last=$CL)"
+  DEF_TWO_STEP="true"
 fi
 ask N_SAMPLES "Dataset size (#images)" "$DEF_N"
 ask EPOCHS    "Training epochs" "$DEF_EPOCHS"
@@ -194,6 +195,7 @@ ask PRETRAINED "Pretrained backbone (true/false; needs internet for weights)" "$
 ask BATCH     "Batch size" "$DEF_BATCH"
 ask WORKERS   "Dataloader workers" "$DEF_WORKERS"
 ask WIDTH     "Render/image size (px)" "$DEF_WIDTH"
+ask TWO_STEP  "Use two-step multi-crop training (true/false)" "${DEF_TWO_STEP:-false}"
 
 mkdir -p configs
 cat > configs/auto.yaml <<EOF
@@ -220,6 +222,7 @@ train:
   label_smoothing: 0.05
   log_interval_steps: $DEF_LOG
   seed: 0
+  two_step: $TWO_STEP
 EOF
 log "wrote configs/auto.yaml (backbone=$BACKBONE pretrained=$PRETRAINED batch=$BATCH epochs=$EPOCHS)"; hr
 
