@@ -65,8 +65,9 @@ class MiiAttrDataset(Dataset):
 
     def __getitem__(self, i):
         r = self.rows[i]
-        img = Image.open(os.path.join(self.root, r["file"])).convert("RGB")
-        x = self.tf(img)
+        with Image.open(os.path.join(self.root, r["file"])) as img:
+            img_rgb = img.convert("RGB")
+            x = self.tf(img_rgb)
         labels = {h: int(r["labels"][h]) for h in HEAD_FIELDS}
         item = (x, labels)
         if "boxes" in r:

@@ -174,7 +174,7 @@ CL="${CHANNELS_LAST:-true}"   # NHWC: ~40% faster conv on CPU (oneDNN) and on GP
 if [ "$HAS_GPU" = 1 ]; then
   # GPU pipeline: big backbone, full res, AMP
   DEF_N=50000; DEF_EPOCHS=20; DEF_BATCH=256; DEF_BACKBONE="vit_base_patch16_siglip_256"; DEF_PRE="true"
-  DEF_WIDTH=256; DEF_WORKERS=$(( NCORES < 16 ? NCORES : 16 )); DEF_AMP="true"; DEF_LR="0.0008"; DEF_WARM=1000; DEF_LOG=50
+  DEF_WIDTH=256; DEF_WORKERS=$(( NCORES < 16 ? NCORES : 16 )); DEF_AMP="true"; DEF_LR="0.0008"; DEF_WARM=1000; DEF_LOG=50; DEF_TWO_STEP="true"
   log "pipeline: GPU (backbone=$DEF_BACKBONE @${DEF_WIDTH}px, AMP)"
 else
   # CPU pipeline: lightweight mobile backbone + low res (much faster on CPU).

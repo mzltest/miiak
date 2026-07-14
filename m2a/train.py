@@ -200,6 +200,7 @@ def main():
     epochs = int(tcfg.get("epochs", 10))
     steps_per_epoch = len(train_loader)
     total_steps = epochs * steps_per_epoch
+    det_epochs = epochs // 2 if two_step else 0
     warmup = int(tcfg.get("warmup_steps", 0))
     base_lr = float(tcfg.get("lr", 1e-3))
     grad_clip = float(tcfg.get("grad_clip", 0))
@@ -233,10 +234,19 @@ def main():
             det_model.train()
         t0 = time.time()
         run_loss, nb = 0.0, 0
+        phase = "det" if two_step and epoch < det_epochs else "cls"
         for batch in train_loader:
             xb = batch[0]
             yb = batch[1]
-            lr = cosine_lr(gstep, total_steps, base_lr, warmup)
+
+            if phase == "det":
+                phase_step = gstep
+                phase_total = det_epochs * steps_per_epoch
+            else:
+                phase_step = gstep - (det_epochs * steps_per_epoch if two_step else 0)
+                phase_total = (epochs - det_epochs) * steps_per_epoch if two_step else total_steps
+
+            lr = cosine_lr(phase_step, phase_total, base_lr, warmup)
             for g in opt.param_groups:
                 g["lr"] = lr
             xb = xb.to(device, non_blocking=True)
@@ -252,40 +262,51 @@ def main():
             opt.zero_grad(set_to_none=True)
             with autocast_ctx():
                 loss = 0.0
-                if two_step:
-                    # Train bounding box regressor if we have ground truth
+                if phase == "det":
                     if gt_boxes is not None:
                         pred_boxes = det_model(xb)
                         box_loss = 0.0
                         for k in gt_boxes:
                             # L1 loss for bounding boxes
                             box_loss += torch.nn.functional.l1_loss(pred_boxes[k], gt_boxes[k])
-                        loss += box_loss * 0.1 # weighting for box loss
-
-                        # Forward pass model with predicted boxes to make the gradient flow all the way
-                        out = model(xb, pred_boxes)
+                        loss += box_loss
                     else:
-                        out = model(xb, det_model(xb))
+                        # Fallback if no gt_boxes available for some reason, just skip
+                        box_loss = torch.tensor(0.0, device=device)
+                        loss += box_loss
                 else:
-                    out = model(xb)
+                    if two_step:
+                        if gt_boxes is not None:
+                            # Phase 2: Train classifier using ground truth boxes
+                            out = model(xb, gt_boxes)
+                        else:
+                            # Fallback: Train classifier using detached predicted boxes
+                            with torch.no_grad():
+                                pred_boxes = det_model(xb)
+                            out = model(xb, pred_boxes)
+                    else:
+                        out = model(xb)
 
-                cls_loss, _ = criterion(out, yb)
-                loss += cls_loss
+                    cls_loss, _ = criterion(out, yb)
+                    loss += cls_loss
 
             scaler.scale(loss).backward()
             if grad_clip > 0:
                 scaler.unscale_(opt)
-                nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+                if phase == "det":
+                    nn.utils.clip_grad_norm_(det_model.parameters(), grad_clip)
+                else:
+                    nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             scaler.step(opt)
             scaler.update()
             run_loss += float(loss.detach())
             nb += 1
             gstep += 1
             if is_main(rank) and (gstep % log_int == 0 or gstep == 1):
-                if two_step and 'box_loss' in locals():
-                    print(f"  e{epoch} step {gstep}/{total_steps} loss {run_loss/nb:.3f} (box_loss: {box_loss:.3f}, cls_loss: {cls_loss:.3f}) lr {lr:.2e}")
+                if phase == "det":
+                    print(f"  e{epoch} [DET] step {gstep}/{total_steps} loss {run_loss/nb:.3f} (box_loss: {loss:.3f}) lr {lr:.2e}")
                 else:
-                    print(f"  e{epoch} step {gstep}/{total_steps} loss {run_loss/nb:.3f} lr {lr:.2e}")
+                    print(f"  e{epoch} [CLS] step {gstep}/{total_steps} loss {run_loss/nb:.3f} lr {lr:.2e}")
             if max_steps and gstep >= max_steps:
                 stop = True
                 break
