@@ -1,78 +1,97 @@
-def compute_bounding_boxes(fields, width):
+import torch
+from PIL import Image, ImageChops
+
+def _union_bbox(box1, box2):
+    if not box1: return box2
+    if not box2: return box1
+    return [min(box1[0], box2[0]), min(box1[1], box2[1]), max(box1[2], box2[2]), max(box1[3], box2[3])]
+
+def compute_bounding_boxes_by_diff(fields, opt, randomizer, renderer):
     """
-    Computes pseudo-bounding boxes [x1, y1, x2, y2] for parts based on the MockRenderer logic.
-    Since Mii renders center the face, we use similar calculations to extract the box.
+    Computes exact bounding boxes by diffing the original render with renders where
+    individual parts are modified/hidden.
     """
-    S = width
-    cx = S // 2
+    # 1. Base render
+    img_base = renderer.render(fields, opt=opt, randomizer=randomizer).convert("RGB")
+
     boxes = {}
+    S = opt.width
+    cx = S // 2
 
-    # Face shape dimensions roughly
-    fw = int(S * (0.46 + 0.02 * (int(fields["faceType"]) % 4)))
-    fh = int(S * 0.60)
+    def get_diff_bbox(mod_fields):
+        img_mod = renderer.render(mod_fields, opt=opt, randomizer=randomizer).convert("RGB")
+        diff = ImageChops.difference(img_base, img_mod)
+        box = diff.getbbox()
+        if box is None:
+            return [0, 0, 0, 0]
+        # expand slightly for safety
+        pad = 2
+        return [max(0, box[0]-pad), max(0, box[1]-pad), min(S, box[2]+pad), min(S, box[3]+pad)]
 
-    # Hair: roughly the top of the head
-    hh = int(S * (0.06 + 0.0014 * int(fields["hairType"])))
-    boxes["hair"] = [cx - fw // 2 - 10, int(S * 0.18) - 10, cx + fw // 2 + 10, int(S * 0.18) + hh + 20]
-
-    # Eyes
-    ey = int(S * (0.34 + 0.012 * int(fields["eyeYPosition"])))
-    ex = int(S * (0.07 + 0.012 * int(fields["eyeSpacing"])))
-    # Both eyes combined bounding box
-    boxes["eye"] = [cx - ex - 25, ey - 20, cx + ex + 25, ey + 20]
-
-    # Eyebrows
-    by = ey - int(20 + (int(fields["eyebrowYPosition"]) - 3))
-    boxes["eyebrow"] = [cx - ex - 25, by - 20, cx + ex + 25, by + 20]
-
-    # Nose
-    ny = int(S * (0.50 + 0.008 * int(fields["noseYPosition"])))
-    boxes["nose"] = [cx - 20, ny - 10, cx + 20, ny + 25]
-
-    # Mouth
-    my = int(S * (0.66 + 0.008 * int(fields["mouthYPosition"])))
-    boxes["mouth"] = [cx - 30, my - 20, cx + 30, my + 20]
-
-    # Facial hair (mustache and beard)
-    fhy1, fhy2 = S, 0
-    fhx1, fhx2 = S, 0
-    has_fh = False
-    if int(fields["mustacheType"]) > 0:
-        fhx1 = min(fhx1, cx - 30)
-        fhx2 = max(fhx2, cx + 30)
-        fhy1 = min(fhy1, my - 20)
-        fhy2 = max(fhy2, my + 5)
-        has_fh = True
-    if int(fields["beardType"]) > 0:
-        fhx1 = min(fhx1, cx - fw // 2 - 10)
-        fhx2 = max(fhx2, cx + fw // 2 + 10)
-        fhy1 = min(fhy1, my - 40)
-        fhy2 = max(fhy2, int(S * 0.84) + 10)
-        has_fh = True
-    if has_fh:
-        boxes["facialHair"] = [fhx1, fhy1, fhx2, fhy2]
-    else:
-        # Invisible bounding box (out of frame or dummy)
-        boxes["facialHair"] = [0, 0, 0, 0]
-
-    # Glasses
-    if int(fields["glassesType"]) > 0:
-        gy = ey + (int(fields["glassesYPosition"]) - 10)
-        boxes["glasses"] = [cx - ex - 30, gy - 25, cx + ex + 30, gy + 25]
+    # Glasses: hide them
+    if fields["glassesType"] > 0:
+        f = fields.copy()
+        f["glassesType"] = 0
+        boxes["glasses"] = get_diff_bbox(f)
     else:
         boxes["glasses"] = [0, 0, 0, 0]
 
-    # Mole
-    if int(fields["moleEnabled"]) == 1:
-        mxp = cx + int((int(fields["moleXPosition"]) - 8) * 4)
-        myp = int(S * 0.62) + int((int(fields["moleYPosition"]) - 15) * 2)
-        boxes["mole"] = [mxp - 15, myp - 15, mxp + 15, myp + 15]
+    # Facial hair: hide them
+    if fields["mustacheType"] > 0 or fields["beardType"] > 0:
+        f = fields.copy()
+        f["mustacheType"] = 0
+        f["beardType"] = 0
+        boxes["facialHair"] = get_diff_bbox(f)
+    else:
+        boxes["facialHair"] = [0, 0, 0, 0]
+
+    # Mole: hide it
+    if fields["moleEnabled"] == 1:
+        f = fields.copy()
+        f["moleEnabled"] = 0
+        boxes["mole"] = get_diff_bbox(f)
     else:
         boxes["mole"] = [0, 0, 0, 0]
 
-    # Clip to [0, S]
+    # Eyes: We can't hide them. Change their type to an extreme opposite and scale to max.
+    f = fields.copy()
+    f["eyeType"] = (fields["eyeType"] + 30) % 60
+    f["eyeScale"] = 7
+    boxes["eye"] = get_diff_bbox(f)
+
+    # Eyebrow: Change type and scale
+    f = fields.copy()
+    f["eyebrowType"] = (fields["eyebrowType"] + 12) % 24
+    f["eyebrowScale"] = 8
+    boxes["eyebrow"] = get_diff_bbox(f)
+
+    # Mouth: Change type and scale
+    f = fields.copy()
+    f["mouthType"] = (fields["mouthType"] + 17) % 35
+    f["mouthScale"] = 8
+    boxes["mouth"] = get_diff_bbox(f)
+
+    # Nose: Change type and scale
+    f = fields.copy()
+    f["noseType"] = (fields["noseType"] + 9) % 17
+    f["noseScale"] = 8
+    boxes["nose"] = get_diff_bbox(f)
+
+    # Hair: We can't easily isolate hair since removing it (type 0) might not cover the bounding box of the original hair.
+    # Instead, we diff with a bald head (type 0). The difference will be the hair itself.
+    if fields["hairType"] != 0:
+        f = fields.copy()
+        f["hairType"] = 0
+        boxes["hair"] = get_diff_bbox(f)
+    else:
+        # If already bald, diff with a big hair
+        f = fields.copy()
+        f["hairType"] = 20
+        boxes["hair"] = get_diff_bbox(f)
+
+    # Validate/cleanup boxes
     for k in boxes:
-        b = boxes[k]
-        if b != [0, 0, 0, 0]:
-            boxes[k] = [max(0, b[0]), max(0, b[1]), min(S, b[2]), min(S, b[3])]
+        if not boxes[k]:
+            boxes[k] = [0, 0, 0, 0]
+
     return boxes
