@@ -211,6 +211,8 @@ def main():
     if args.resume and os.path.isfile(args.resume):
         ck = torch.load(args.resume, map_location=device)
         (model.module if distributed else model).load_state_dict(ck["model"])
+        if det_model is not None and "det_model" in ck:
+            (det_model.module if distributed else det_model).load_state_dict(ck["det_model"])
         opt.load_state_dict(ck["opt"])
         scaler.load_state_dict(ck["scaler"])
         start_epoch = ck["epoch"] + 1
